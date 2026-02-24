@@ -4,8 +4,12 @@ import { env } from './environment';
 let slackApp: App | null = null;
 let receiver: ExpressReceiver | null = null;
 
+const isProduction = env.nodeEnv === 'production';
+
 /**
- * Initializes Slack Bolt app with Express receiver
+ * Initializes Slack Bolt app.
+ * Production: HTTP mode via ExpressReceiver.
+ * Development: Socket Mode (no public URL required).
  */
 export function initializeSlack(): App {
   if (slackApp) {
@@ -13,17 +17,23 @@ export function initializeSlack(): App {
   }
 
   try {
-    // Create Express receiver
-    receiver = new ExpressReceiver({
-      signingSecret: env.slackSigningSecret,
-    });
+    if (isProduction) {
+      receiver = new ExpressReceiver({
+        signingSecret: env.slackSigningSecret,
+      });
+      slackApp = new App({
+        token: env.slackBotToken,
+        receiver,
+      });
+    } else {
+      slackApp = new App({
+        token: env.slackBotToken,
+        appToken: env.slackAppToken,
+        socketMode: true,
+      });
+    }
 
-    slackApp = new App({
-      token: env.slackBotToken,
-      receiver,
-    });
-
-    console.log('Slack app initialized successfully');
+    console.log(`Slack app initialized (${isProduction ? 'HTTP mode' : 'Socket Mode'})`);
     return slackApp;
   } catch (error) {
     console.error('Failed to initialize Slack app:', error);
@@ -32,13 +42,10 @@ export function initializeSlack(): App {
 }
 
 /**
- * Gets the Express receiver
+ * Gets the Express receiver. Returns null in Socket Mode (development).
  */
-export function getReceiver(): ExpressReceiver {
-  if (!receiver) {
-    initializeSlack();
-  }
-  return receiver!;
+export function getReceiver(): ExpressReceiver | null {
+  return receiver;
 }
 
 /**

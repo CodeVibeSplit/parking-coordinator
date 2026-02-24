@@ -1,3 +1,4 @@
+import express from 'express';
 import { initializeFirebase } from './config/firebase';
 import { initializeSlack, getReceiver } from './config/slack';
 import { env } from './config/environment';
@@ -29,26 +30,46 @@ async function main() {
     registerActionHandlers(app);
     registerReorderHandlers(app);
 
-    // Get the Express app from Slack receiver
-    const receiver = getReceiver();
-    const expressApp = receiver.app;
-
-    // Health check endpoint
-    expressApp.get('/health', (_req, res) => {
-      res.json({
-        status: 'healthy',
-        timestamp: new Date().toISOString(),
-        timezone: env.timezone,
-      });
-    });
-
-    // Start Express server (Bolt handles /slack/events automatically)
     const port = env.port;
-    receiver.start(port).then(() => {
-      console.log(`\n✅ Server is running on port ${port}`);
-      console.log(`   Health check: http://localhost:${port}/health`);
-      console.log(`   Slack events: http://localhost:${port}/slack/events`);
-    });
+    const receiver = getReceiver();
+
+    if (receiver) {
+      // Production: HTTP mode — Bolt's ExpressReceiver handles /slack/events
+      const expressApp = receiver.app;
+
+      expressApp.get('/health', (_req, res) => {
+        res.json({
+          status: 'healthy',
+          timestamp: new Date().toISOString(),
+          timezone: env.timezone,
+        });
+      });
+
+      receiver.start(port).then(() => {
+        console.log(`\n✅ Server is running on port ${port}`);
+        console.log(`   Health check: http://localhost:${port}/health`);
+        console.log(`   Slack events: http://localhost:${port}/slack/events`);
+      });
+    } else {
+      // Development: Socket Mode — start a minimal Express server for /health only
+      const expressApp = express();
+
+      expressApp.get('/health', (_req, res) => {
+        res.json({
+          status: 'healthy',
+          timestamp: new Date().toISOString(),
+          timezone: env.timezone,
+        });
+      });
+
+      expressApp.listen(port, () => {
+        console.log(`\n✅ Dev server running on port ${port}`);
+        console.log(`   Health check: http://localhost:${port}/health`);
+        console.log(`   Slack: connected via Socket Mode (no public URL needed)`);
+      });
+
+      await app.start();
+    }
 
     // Initialize scheduler
     console.log('\n⏰ Initializing scheduler...');

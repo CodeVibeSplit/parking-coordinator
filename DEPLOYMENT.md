@@ -9,6 +9,7 @@ This app runs on Azure App Service as a Docker container, deployed automatically
 - [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli) installed and logged in (`az login`)
 - [GitHub CLI](https://cli.github.com/) (optional, for repo creation)
 - An Azure subscription
+- `jq` installed locally (`brew install jq`) — required by the URL management scripts
 
 ---
 
@@ -123,6 +124,7 @@ Go to your repository → **Settings → Secrets and variables → Actions → N
 | `REGISTRY_USERNAME` | ACR admin username (see below) |
 | `REGISTRY_PASSWORD` | ACR admin password (see below) |
 | `AZURE_WEBAPP_NAME` | Your App Service name (value of `$APP_NAME`) |
+| `SLACK_APP_TOKEN` | Your `xapp-` app-level token |
 
 Retrieve ACR credentials:
 
@@ -143,6 +145,42 @@ The pipeline is defined in `.github/workflows/deploy.yml` and runs on every push
 2. **Build** — builds a Docker image using the multi-stage `Dockerfile`
 3. **Push** — pushes the image to Azure Container Registry, tagged with the Git commit SHA and `latest`
 4. **Deploy** — deploys the commit-SHA-tagged image to Azure App Service
+5. **Restore Slack URLs** — updates all slash command URLs and the interactivity request URL in the Slack app manifest back to the production URL
+
+---
+
+## Slack URL Management
+
+### Local development (Socket Mode)
+
+In development (`NODE_ENV` anything other than `production`), the app runs in **Socket Mode**. It connects to Slack via WebSocket using the `SLACK_APP_TOKEN`, so no public URL or ngrok is needed. The slash command and interactivity URLs in the Slack dashboard are irrelevant in this mode.
+
+```bash
+bash scripts/dev.sh
+```
+
+Requires `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN` in your `.env` file.
+
+### Production (HTTP mode)
+
+In production, the app uses `ExpressReceiver` and Slack sends events to `https://parking-coordinator-app.azurewebsites.net/slack/events`. This URL is set once in the Slack app dashboard and never needs to change between deployments.
+
+Set the following URLs in your Slack app settings (api.slack.com/apps) once:
+
+- **Slash Commands** — each command's Request URL: `https://parking-coordinator-app.azurewebsites.net/slack/events`
+- **Interactivity & Shortcuts** → Request URL: `https://parking-coordinator-app.azurewebsites.net/slack/events`
+
+### `scripts/set-slack-urls.sh <base_url>` (manual utility)
+
+Updates all slash command URLs and the interactivity request URL in the Slack app manifest in a single API call. Useful if you need to point the app at a different URL manually.
+
+> **Note:** Requires a Slack app configuration token (`xoxe.` prefix), not the regular `xapp-` token. These are obtained via the Slack App Management API OAuth flow.
+
+Requires `SLACK_APP_TOKEN` (app config token) and `SLACK_APP_ID` in the environment:
+
+```bash
+SLACK_APP_TOKEN=xoxe-... SLACK_APP_ID=A0XXXXXXX bash scripts/set-slack-urls.sh https://your-url.example.com
+```
 
 ---
 
