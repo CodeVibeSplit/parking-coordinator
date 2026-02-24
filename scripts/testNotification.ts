@@ -20,9 +20,9 @@ async function testNotification() {
 
     console.log(`Notification will be sent to channel: ${env.notificationChannelId}\n`);
 
-    // Trigger notification
+    // Trigger notification (force=true bypasses the duplicate-check guard)
     console.log('Triggering daily notification...');
-    await triggerDailyNotification();
+    await triggerDailyNotification(true);
 
     console.log('\n✅ Notification sent successfully!');
     console.log('Check your Slack channel for the parking assignment message.');

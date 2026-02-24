@@ -80,7 +80,7 @@ export function initializeScheduler(): void {
 /**
  * Send daily notification job
  */
-async function sendDailyNotificationJob(): Promise<void> {
+async function sendDailyNotificationJob(force = false): Promise<void> {
   const today = getCurrentDate();
 
   // Only run on weekdays
@@ -94,7 +94,7 @@ async function sendDailyNotificationJob(): Promise<void> {
 
   // Check if notification already sent
   const existing = await getParkingAssignment(tomorrowStr);
-  if (existing && existing.notificationSentAt) {
+  if (!force && existing && existing.notificationSentAt) {
     console.log(`Notification already sent for ${tomorrowStr}`);
     return;
   }
@@ -213,9 +213,9 @@ async function handleWeekBoundaryJob(): Promise<void> {
 /**
  * Manually trigger daily notification (for testing)
  */
-export async function triggerDailyNotification(): Promise<void> {
+export async function triggerDailyNotification(force = false): Promise<void> {
   console.log('Manually triggering daily notification');
-  await sendDailyNotificationJob();
+  await sendDailyNotificationJob(force);
 }
 
 /**
