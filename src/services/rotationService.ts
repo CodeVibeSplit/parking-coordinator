@@ -9,7 +9,6 @@ import {
 import {
   toISODate,
   getWeekStart,
-  isDateInWeek,
   getCurrentWeekStart,
   fromISODate,
   isWeekday,
@@ -30,8 +29,6 @@ export async function getAssignmentsForDate(date: Date): Promise<string[]> {
   if (!rotationState) {
     throw new Error('Rotation state not found');
   }
-
-  const dateStr = toISODate(date);
 
   // Check if date is a weekday
   if (!isWeekday(date)) {
@@ -60,8 +57,6 @@ export async function calculateNextAssignments(
   }
 
   const dateStr = toISODate(date);
-  const weekStart = getWeekStart(date);
-  const weekStartStr = toISODate(weekStart);
 
   // Get vacations for this specific date
   const vacations = await getVacationsInRange(dateStr, dateStr);

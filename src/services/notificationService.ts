@@ -1,6 +1,6 @@
 import { getSlackApp } from '../config/slack';
 import { env } from '../config/environment';
-import { formatDateDisplay, toISODate } from '../utils/dateUtils';
+import { formatDateDisplay } from '../utils/dateUtils';
 import { SLACK_ACTIONS } from '../models/constants';
 import type { ParkingAssignment, UserStatistics } from '../models/types';
 
@@ -89,7 +89,7 @@ export async function updateDailyNotification(
           .join(', ')}`
       : '';
 
-  const blocks = [
+  const blocks: any[] = [
     {
       type: 'section',
       text: {
@@ -158,7 +158,7 @@ export async function updateDailyNotification(
 export async function sendForfeitNotification(
   userId: string,
   date: string,
-  originalMessageTs: string
+  _originalMessageTs: string
 ): Promise<void> {
   const app = getSlackApp();
   const dateDisplay = formatDateDisplay(new Date(date));

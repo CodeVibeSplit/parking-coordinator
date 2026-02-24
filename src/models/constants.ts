@@ -48,12 +48,14 @@ export const SLACK_COMMANDS = {
   VACATION: '/parking-vacation',
   STATS: '/parking-stats',
   ADMIN_OVERRIDE: '/parking-admin-override',
+  ADMIN_REORDER: '/parking-admin-reorder',
 } as const;
 
 // Slack action IDs
 export const SLACK_ACTIONS = {
   FORFEIT_SPOT: 'forfeit_spot',
   CONFIRM_PARKING: 'confirm_parking',
+  REORDER_MOVE: 'reorder_move',
 } as const;
 
 // Error messages

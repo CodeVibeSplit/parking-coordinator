@@ -3,7 +3,6 @@ import { addVacation, removeVacation, getVacationsForUser } from '../services/va
 import { getStatistics, getUserStatistics } from '../services/balanceService';
 import {
   validateISODate,
-  validateDateRange,
   validateVacationPeriod,
 } from '../utils/validators';
 import {
@@ -27,7 +26,6 @@ import {
   fromISODate,
 } from '../utils/dateUtils';
 import { ERROR_MESSAGES, SUCCESS_MESSAGES } from '../models/constants';
-import { now } from '../config/firebase';
 import type { ParkingAssignment } from '../models/types';
 
 type CommandHandler = (

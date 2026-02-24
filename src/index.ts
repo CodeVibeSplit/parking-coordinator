@@ -4,6 +4,7 @@ import { env } from './config/environment';
 import { initializeScheduler } from './services/schedulerService';
 import { registerCommandHandlers } from './handlers/commandHandlers';
 import { registerActionHandlers } from './handlers/actionHandlers';
+import { registerReorderHandlers } from './handlers/reorderHandlers';
 
 /**
  * Main application entry point
@@ -26,13 +27,14 @@ async function main() {
     console.log('\n🔌 Registering handlers...');
     registerCommandHandlers(app);
     registerActionHandlers(app);
+    registerReorderHandlers(app);
 
     // Get the Express app from Slack receiver
     const receiver = getReceiver();
     const expressApp = receiver.app;
 
     // Health check endpoint
-    expressApp.get('/health', (req, res) => {
+    expressApp.get('/health', (_req, res) => {
       res.json({
         status: 'healthy',
         timestamp: new Date().toISOString(),
@@ -64,6 +66,7 @@ async function main() {
     console.log('   /parking-vacation remove <id> - Remove vacation');
     console.log('   /parking-stats [user] - View parking statistics');
     console.log('   /parking-admin-override <date> <users...> - Admin override');
+    console.log('   /parking-admin-reorder - Admin: Reorder team rotation');
 
     // Handle graceful shutdown
     process.on('SIGINT', async () => {

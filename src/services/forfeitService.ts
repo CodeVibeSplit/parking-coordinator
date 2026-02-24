@@ -4,6 +4,7 @@ import {
   addParkingHistory,
   addAuditLog,
 } from '../utils/firestoreUtils';
+import { getFirestore } from '../config/firebase';
 import {
   sendForfeitNotification,
   updateDailyNotification,
@@ -25,7 +26,7 @@ export async function handleForfeit(
   try {
     // Use transaction to ensure consistency
     const result = await runTransaction(async (transaction) => {
-      const db = transaction.firestore;
+      const db = getFirestore();
       const docRef = db.collection('parkingAssignments').doc(date);
       const doc = await transaction.get(docRef);
 
@@ -105,7 +106,7 @@ export async function handleForfeit(
 
       // Update in database
       await runTransaction(async (transaction) => {
-        const db = transaction.firestore;
+        const db = getFirestore();
         const docRef = db.collection('parkingAssignments').doc(date);
         transaction.update(docRef, {
           assignedUsers: updatedAssignment.assignedUsers,
@@ -215,7 +216,7 @@ export async function finalizeAssignment(date: string): Promise<void> {
 
   // Update assignment
   await runTransaction(async (transaction) => {
-    const db = transaction.firestore;
+    const db = getFirestore();
     const docRef = db.collection('parkingAssignments').doc(date);
     transaction.update(docRef, {
       isFinalized: true,

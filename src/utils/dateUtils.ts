@@ -155,7 +155,7 @@ export function parseTime(date: Date, timeString: string): Date {
  */
 export function isWithinTimeWindow(
   date: Date,
-  startTime: string,
+  _startTime: string,
   endTime: string
 ): boolean {
   const now = getCurrentDate();

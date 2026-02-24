@@ -185,6 +185,10 @@ Create these slash commands in your Slack app (Slash Commands section):
    - Request URL: `https://your-server.com/slack/events`
    - Short Description: Admin only - manually override assignments
 
+5. `/parking-admin-reorder`
+   - Request URL: `https://your-server.com/slack/events`
+   - Short Description: Admin only - reorder team rotation
+
 ### Event Subscriptions
 
 Enable Event Subscriptions and set Request URL to: `https://your-server.com/slack/events`
@@ -247,6 +251,25 @@ Shows parking assignments starting from today (default: 7 days including today)
 
 **Example:**
 - `/parking-admin-override 2026-02-24 U123 U456 U789`
+
+#### Admin Reorder (Admin Only)
+```
+/parking-admin-reorder
+```
+
+Opens an interactive modal where admins can reorder the parking assignment for a specific day using up/down buttons.
+
+**Usage:**
+1. Run `/parking-admin-reorder`
+2. A date picker modal opens - select the date you want to reorder
+3. Click "Next" to see the assigned users for that date with team member names (not IDs)
+4. Use ⬆️ and ⬇️ buttons to move team members up or down in the assignment order
+5. Click "Save Order" to apply the changes
+
+**Example:**
+- `/parking-admin-reorder` - Opens the date selection modal
+
+**Note:** This only reorders the assignment for a specific date, not the global rotation order.
 
 ### Forfeiting a Spot
 
