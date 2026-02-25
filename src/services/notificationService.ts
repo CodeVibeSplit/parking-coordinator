@@ -1,20 +1,30 @@
 import { getSlackApp } from '../config/slack';
 import { env } from '../config/environment';
-import { formatDateDisplay } from '../utils/dateUtils';
+import { formatDateDisplay, fromISODate, addDays } from '../utils/dateUtils';
 import { SLACK_ACTIONS } from '../models/constants';
+import { updateParkingAssignment } from '../utils/firestoreUtils';
+import { now } from '../config/firebase';
 import type { ParkingAssignment, UserStatistics } from '../models/types';
 
 /**
  * Send daily parking notification to the channel
  */
 export async function sendDailyNotification(
-  assignment: ParkingAssignment
+  assignment: ParkingAssignment,
+  secondaryListWithPoints: Array<{ userId: string; points: number }> = []
 ): Promise<string> {
   const app = getSlackApp();
   const date = new Date(assignment.date);
   const dateDisplay = formatDateDisplay(date);
 
-  const blocks = [
+  const secondaryText =
+    secondaryListWithPoints.length > 0
+      ? secondaryListWithPoints
+          .map((u, i) => `${i + 1}. <@${u.userId}> (${u.points} pts)`)
+          .join('\n')
+      : '_No secondary users available_';
+
+  const blocks: any[] = [
     {
       type: 'section',
       text: {
@@ -33,7 +43,7 @@ export async function sendDailyNotification(
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: "_Can't make it? Click the button below to forfeit your spot (until 6:00 PM today)_",
+        text: '_Please confirm or forfeit your spot by 6:00 PM today_',
       },
     },
     {
@@ -43,13 +53,30 @@ export async function sendDailyNotification(
           type: 'button',
           text: {
             type: 'plain_text',
-            text: 'Forfeit My Spot',
+            text: '✅ Confirm My Spot',
+          },
+          style: 'primary',
+          action_id: SLACK_ACTIONS.CONFIRM_PARKING,
+          value: assignment.date,
+        },
+        {
+          type: 'button',
+          text: {
+            type: 'plain_text',
+            text: '❌ Forfeit My Spot',
           },
           style: 'danger',
           action_id: SLACK_ACTIONS.FORFEIT_SPOT,
           value: assignment.date,
         },
       ],
+    },
+    {
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*Secondary Queue (by points):*\n${secondaryText}`,
+      },
     },
   ];
 
@@ -77,9 +104,16 @@ export async function updateDailyNotification(
   const date = new Date(assignment.date);
   const dateDisplay = formatDateDisplay(date);
 
+  const confirmedUsers = assignment.confirmedUsers ?? [];
+
   const assignedText =
     assignment.assignedUsers.length > 0
-      ? assignment.assignedUsers.map((userId) => `• <@${userId}>`).join('\n')
+      ? assignment.assignedUsers
+          .map((userId) => {
+            const status = confirmedUsers.includes(userId) ? '✅' : '⏳';
+            return `• ${status} <@${userId}>`;
+          })
+          .join('\n')
       : '_No spots assigned_';
 
   const forfeitedText =
@@ -106,14 +140,14 @@ export async function updateDailyNotification(
     },
   ];
 
-  // Add forfeit button if not finalized
+  // Add confirm/forfeit buttons if not finalized
   if (!assignment.isFinalized) {
     blocks.push(
       {
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: "_Can't make it? Click the button below to forfeit your spot (until 6:00 PM today)_",
+          text: '_Please confirm or forfeit your spot by 6:00 PM today_',
         },
       },
       {
@@ -123,7 +157,17 @@ export async function updateDailyNotification(
             type: 'button',
             text: {
               type: 'plain_text',
-              text: 'Forfeit My Spot',
+              text: '✅ Confirm My Spot',
+            },
+            style: 'primary',
+            action_id: SLACK_ACTIONS.CONFIRM_PARKING,
+            value: assignment.date,
+          },
+          {
+            type: 'button',
+            text: {
+              type: 'plain_text',
+              text: '❌ Forfeit My Spot',
             },
             style: 'danger',
             action_id: SLACK_ACTIONS.FORFEIT_SPOT,
@@ -172,14 +216,7 @@ export async function sendForfeitNotification(
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `🅿️ You've been assigned a parking spot for *${dateDisplay}*!\n\nSomeone forfeited their spot and you're next in line.`,
-        },
-      },
-      {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: "Can't make it? You can also forfeit your spot until 6:00 PM today.",
+          text: `🅿️ You've been assigned a parking spot for *${dateDisplay}*!\n\nSomeone forfeited their spot and you're next in line.\nPlease confirm or forfeit your spot by 6:00 PM today.`,
         },
       },
       {
@@ -189,7 +226,17 @@ export async function sendForfeitNotification(
             type: 'button',
             text: {
               type: 'plain_text',
-              text: 'Forfeit My Spot',
+              text: '✅ Confirm My Spot',
+            },
+            style: 'primary',
+            action_id: SLACK_ACTIONS.CONFIRM_PARKING,
+            value: date,
+          },
+          {
+            type: 'button',
+            text: {
+              type: 'plain_text',
+              text: '❌ Forfeit My Spot',
             },
             style: 'danger',
             action_id: SLACK_ACTIONS.FORFEIT_SPOT,
@@ -199,6 +246,63 @@ export async function sendForfeitNotification(
       },
     ],
   });
+}
+
+/**
+ * Send attendance check ephemeral messages to all assigned users for today.
+ * Records attendanceCheckSentAt on the assignment.
+ */
+export async function sendAttendanceCheck(assignment: ParkingAssignment): Promise<void> {
+  const app = getSlackApp();
+  const dateDisplay = formatDateDisplay(new Date(assignment.date));
+
+  for (const userId of assignment.assignedUsers) {
+    await app.client.chat.postEphemeral({
+      channel: env.notificationChannelId,
+      user: userId,
+      text: `Did you park today (${dateDisplay})?`,
+      blocks: [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: `🅿️ *Did you park today (${dateDisplay})?*\nPlease let us know so we can keep records accurate.`,
+          },
+        },
+        {
+          type: 'actions',
+          elements: [
+            {
+              type: 'button',
+              text: {
+                type: 'plain_text',
+                text: '✅ Yes, I parked',
+              },
+              style: 'primary',
+              action_id: SLACK_ACTIONS.PARKED_YES,
+              value: assignment.date,
+            },
+            {
+              type: 'button',
+              text: {
+                type: 'plain_text',
+                text: '❌ No, I didn\'t park',
+              },
+              style: 'danger',
+              action_id: SLACK_ACTIONS.PARKED_NO,
+              value: assignment.date,
+            },
+          ],
+        },
+      ],
+    });
+  }
+
+  await updateParkingAssignment(assignment.date, {
+    attendanceCheckSentAt: now(),
+  });
+
+  console.log(`Attendance check sent for ${assignment.date} to ${assignment.assignedUsers.length} user(s)`);
 }
 
 /**
@@ -270,6 +374,40 @@ export function formatVacations(
   }
 
   return text;
+}
+
+/**
+ * Send weekly parking announcement to the channel every Friday at 16:00.
+ * Lists the 3 primary users for the coming week.
+ */
+export async function sendWeeklyAnnouncement(
+  weekStartDate: string,
+  primaryUserIds: string[]
+): Promise<void> {
+  const app = getSlackApp();
+  const weekStart = fromISODate(weekStartDate);
+  const weekFriday = addDays(weekStart, 4);
+  const weekStartDisplay = formatDateDisplay(weekStart);
+  const weekFridayDisplay = formatDateDisplay(weekFriday);
+
+  const primaryList = primaryUserIds.map((id) => `• <@${id}>`).join('\n');
+
+  await app.client.chat.postMessage({
+    channel: env.notificationChannelId,
+    text: `Next week's parking primaries (${weekStartDate})`,
+    blocks: [
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text:
+            `*🅿️ Next Week's Parking Schedule (${weekStartDisplay} – ${weekFridayDisplay})*\n\n` +
+            `Primary team for the week:\n${primaryList}\n\n` +
+            `_These 3 have a spot every day next week. If a primary is on vacation that day, the team member with the lowest ratio fills in._`,
+        },
+      },
+    ],
+  });
 }
 
 /**

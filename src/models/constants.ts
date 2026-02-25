@@ -6,6 +6,9 @@ export const COLLECTIONS = {
   PARKING_ASSIGNMENTS: 'parkingAssignments',
   PARKING_HISTORY: 'parkingHistory',
   AUDIT_LOG: 'auditLog',
+  USERS: 'users',
+  POINTS_HISTORY: 'pointsHistory',
+  WEEKLY_SCHEDULE: 'weeklySchedule',
 } as const;
 
 // Document IDs for singleton documents
@@ -56,6 +59,8 @@ export const SLACK_ACTIONS = {
   FORFEIT_SPOT: 'forfeit_spot',
   CONFIRM_PARKING: 'confirm_parking',
   REORDER_MOVE: 'reorder_move',
+  PARKED_YES: 'parked_yes',
+  PARKED_NO: 'parked_no',
 } as const;
 
 // Error messages
@@ -63,6 +68,7 @@ export const ERROR_MESSAGES = {
   NOT_ASSIGNED: 'You are not assigned a parking spot for this day.',
   FORFEIT_WINDOW_CLOSED: 'The forfeit window has closed. You can no longer forfeit your spot.',
   ALREADY_FORFEITED: 'You have already forfeited your spot for this day.',
+  ALREADY_CONFIRMED: 'You have already confirmed your spot.',
   INVALID_DATE_FORMAT: 'Invalid date format. Please use YYYY-MM-DD.',
   VACATION_NOT_FOUND: 'Vacation not found.',
   UNAUTHORIZED: 'You are not authorized to perform this action.',
@@ -74,6 +80,7 @@ export const ERROR_MESSAGES = {
 // Success messages
 export const SUCCESS_MESSAGES = {
   FORFEIT_SUCCESS: 'Your parking spot has been forfeited.',
+  CONFIRM_SUCCESS: 'Your parking spot has been confirmed!',
   VACATION_ADDED: 'Vacation has been added successfully.',
   VACATION_REMOVED: 'Vacation has been removed successfully.',
   OVERRIDE_SUCCESS: 'Parking assignment has been overridden.',

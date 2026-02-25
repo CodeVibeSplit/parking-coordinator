@@ -1,6 +1,6 @@
 import { SlackCommandMiddlewareArgs, AllMiddlewareArgs } from '@slack/bolt';
 import { addVacation, removeVacation, getVacationsForUser } from '../services/vacationService';
-import { getStatistics, getUserStatistics } from '../services/balanceService';
+import { getStatistics } from '../services/balanceService';
 import {
   validateISODate,
   validateVacationPeriod,
@@ -14,7 +14,16 @@ import {
   getParkingAssignmentsInRange,
   setParkingAssignment,
   addAuditLog,
+  getUser,
+  setUser,
+  updateUser,
+  updateConfig,
+  getConfig,
+  getUserPointsHistory,
+  getUserPrimaryAssignments,
+  getUserParkingHistory,
 } from '../utils/firestoreUtils';
+import { now } from '../config/firebase';
 import { isAdmin } from '../config/slack';
 import {
   toISODate,
@@ -24,6 +33,8 @@ import {
   isWeekday,
   getCurrentWeekStart,
   fromISODate,
+  getBusinessDaysBetween,
+  daysDifference,
 } from '../utils/dateUtils';
 import { ERROR_MESSAGES, SUCCESS_MESSAGES } from '../models/constants';
 import type { ParkingAssignment } from '../models/types';
@@ -201,17 +212,61 @@ export const handleStatsCommand: CommandHandler = async ({
       });
     } else {
       // Show stats for specific user
-      const stats = await getUserStatistics(userId);
+      const [user, pointsHistory, primaryAssignments, parkingHistory, vacations] =
+        await Promise.all([
+          getUser(userId),
+          getUserPointsHistory(userId, 3),
+          getUserPrimaryAssignments(userId),
+          getUserParkingHistory(userId),
+          getVacationsForUser(userId),
+        ]);
 
-      const balanceEmoji = stats.balanceScore < 0 ? '📉' : stats.balanceScore > 0 ? '📈' : '➡️';
+      const primaryAssigned = primaryAssignments.length;
+      const primaryParked = primaryAssignments.filter(
+        (a) => !a.forfeitedUsers.includes(userId)
+      ).length;
+      const primaryRatio =
+        primaryAssigned > 0 ? `${primaryParked}/${primaryAssigned}` : '—';
+
+      const totalParked = parkingHistory.filter((h) => h.parked).length;
+
+      const vacationDays = vacations.reduce((sum, v) => {
+        return sum + getBusinessDaysBetween(fromISODate(v.startDate), fromISODate(v.endDate));
+      }, 0);
+
+      const currentScore = user?.points ?? 0;
+
+      const daysSince = user?.registeredAt
+        ? daysDifference(getCurrentDate(), user.registeredAt.toDate())
+        : null;
+
+      const reasonLabel: Record<string, string> = {
+        confirm_before_deadline: 'Confirmed parking',
+        forfeit_before_deadline: 'Forfeited in time',
+        no_show: 'No-show',
+        no_attendance_response: 'No attendance response',
+      };
+
+      const pointsLines = pointsHistory.map((entry) => {
+        const arrow = entry.delta >= 0 ? '📈' : '📉';
+        const sign = entry.delta >= 0 ? '+' : '';
+        const label = reasonLabel[entry.reason] ?? entry.reason;
+        const datePart = entry.affectedDate ? ` · ${entry.affectedDate}` : '';
+        return `${arrow} ${sign}${entry.delta} · ${label}${datePart}`;
+      });
+
+      const registeredLine = daysSince !== null ? `📅 Registered ${daysSince} days ago\n` : '';
 
       const text =
-        `*Parking Statistics for <@${userId}>*\n\n` +
-        `📊 Days Assigned: ${stats.totalDaysAssigned}\n` +
-        `🅿️ Days Parked: ${stats.totalDaysParked}\n` +
-        `❌ Days Forfeited: ${stats.totalDaysForfeited}\n` +
-        `${balanceEmoji} Balance: ${stats.balanceScore > 0 ? '+' : ''}${stats.balanceScore}\n\n` +
-        `_Balance: positive = parked more than fair share, negative = owed parking days_`;
+        `*Parking stats for <@${userId}>*\n\n` +
+        registeredLine +
+        `🏖️ Vacation days: ${vacationDays}\n` +
+        `🅿️ Parked days: ${totalParked}\n` +
+        `🎯 Primary attendance: ${primaryRatio}\n` +
+        `⭐ Reputation score: ${currentScore}` +
+        (pointsLines.length > 0
+          ? `\n\n*Recent points activity:*\n${pointsLines.join('\n')}`
+          : '');
 
       await respond({
         response_type: 'ephemeral',
@@ -278,6 +333,11 @@ export const handleAdminOverrideCommand: CommandHandler = async ({
       dayOfWeek: getDayOfWeek(fromISODate(date)),
       assignedUsers: userIds,
       forfeitedUsers: [],
+      confirmedUsers: [],
+      originalPrimaryUsers: [...userIds],
+      secondaryList: [],
+      attendedUsers: [],
+      absentUsers: [],
       isFinalized: false,
       weekStartDate: toISODate(getCurrentWeekStart()),
     };
@@ -303,6 +363,145 @@ export const handleAdminOverrideCommand: CommandHandler = async ({
 };
 
 /**
+ * Handle /parking-admin-add-member @user (admin only)
+ * Creates a user doc with registeredAt = today and adds them to the team.
+ */
+export const handleAdminAddMemberCommand: CommandHandler = async ({
+  command,
+  ack,
+  respond,
+}) => {
+  await ack();
+
+  if (!isAdmin(command.user_id)) {
+    await respond({ response_type: 'ephemeral', text: `❌ ${ERROR_MESSAGES.UNAUTHORIZED}` });
+    return;
+  }
+
+  const arg = command.text.trim();
+  const userId = arg.match(/^<@([A-Z0-9]+)(?:\|[^>]+)?>$/)?.[1] ?? arg;
+
+  if (!userId || !userId.startsWith('U')) {
+    await respond({
+      response_type: 'ephemeral',
+      text: '❌ Usage: `/parking-admin-add-member @user`',
+    });
+    return;
+  }
+
+  try {
+    const config = await getConfig();
+    if (!config) {
+      await respond({ response_type: 'ephemeral', text: `❌ ${ERROR_MESSAGES.DATABASE_ERROR}` });
+      return;
+    }
+
+    if (config.teamMembers.includes(userId)) {
+      await respond({
+        response_type: 'ephemeral',
+        text: `❌ <@${userId}> is already a team member.`,
+      });
+      return;
+    }
+
+    const existing = await getUser(userId);
+    if (existing) {
+      await updateUser(userId, { isActive: true });
+    } else {
+      await setUser({
+        userId,
+        displayName: '',
+        registeredAt: now(),
+        isActive: true,
+        points: 0,
+      });
+    }
+
+    await updateConfig({
+      teamMembers: [...config.teamMembers, userId],
+      rotationOrder: [...config.rotationOrder, userId],
+    });
+
+    await addAuditLog('ROTATION_OVERRIDE', command.user_id, {
+      action: 'add_member',
+      userId,
+    });
+
+    await respond({
+      response_type: 'ephemeral',
+      text: `✅ <@${userId}> has been added to the team.`,
+    });
+  } catch (error) {
+    console.error('Error adding member:', error);
+    await respond({ response_type: 'ephemeral', text: `❌ ${ERROR_MESSAGES.DATABASE_ERROR}` });
+  }
+};
+
+/**
+ * Handle /parking-admin-remove-member @user (admin only)
+ * Sets the user as inactive and removes them from the rotation.
+ */
+export const handleAdminRemoveMemberCommand: CommandHandler = async ({
+  command,
+  ack,
+  respond,
+}) => {
+  await ack();
+
+  if (!isAdmin(command.user_id)) {
+    await respond({ response_type: 'ephemeral', text: `❌ ${ERROR_MESSAGES.UNAUTHORIZED}` });
+    return;
+  }
+
+  const arg = command.text.trim();
+  const userId = arg.match(/^<@([A-Z0-9]+)(?:\|[^>]+)?>$/)?.[1] ?? arg;
+
+  if (!userId || !userId.startsWith('U')) {
+    await respond({
+      response_type: 'ephemeral',
+      text: '❌ Usage: `/parking-admin-remove-member @user`',
+    });
+    return;
+  }
+
+  try {
+    const config = await getConfig();
+    if (!config) {
+      await respond({ response_type: 'ephemeral', text: `❌ ${ERROR_MESSAGES.DATABASE_ERROR}` });
+      return;
+    }
+
+    if (!config.teamMembers.includes(userId)) {
+      await respond({
+        response_type: 'ephemeral',
+        text: `❌ <@${userId}> is not a team member.`,
+      });
+      return;
+    }
+
+    await updateUser(userId, { isActive: false });
+
+    await updateConfig({
+      teamMembers: config.teamMembers.filter((id) => id !== userId),
+      rotationOrder: config.rotationOrder.filter((id) => id !== userId),
+    });
+
+    await addAuditLog('ROTATION_OVERRIDE', command.user_id, {
+      action: 'remove_member',
+      userId,
+    });
+
+    await respond({
+      response_type: 'ephemeral',
+      text: `✅ <@${userId}> has been removed from the team.`,
+    });
+  } catch (error) {
+    console.error('Error removing member:', error);
+    await respond({ response_type: 'ephemeral', text: `❌ ${ERROR_MESSAGES.DATABASE_ERROR}` });
+  }
+};
+
+/**
  * Register all command handlers
  */
 export function registerCommandHandlers(app: any): void {
@@ -310,6 +509,8 @@ export function registerCommandHandlers(app: any): void {
   app.command('/parking-vacation', handleVacationCommand);
   app.command('/parking-stats', handleStatsCommand);
   app.command('/parking-admin-override', handleAdminOverrideCommand);
+  app.command('/parking-admin-add-member', handleAdminAddMemberCommand);
+  app.command('/parking-admin-remove-member', handleAdminRemoveMemberCommand);
 
   console.log('Command handlers registered');
 }

@@ -8,6 +8,9 @@ import type {
   ParkingHistory,
   AuditLog,
   AuditAction,
+  User,
+  PointsHistoryEntry,
+  WeeklySchedule,
 } from '../models/types';
 
 /**
@@ -109,10 +112,11 @@ export async function getUserVacations(userId: string): Promise<Vacation[]> {
   const snapshot = await db
     .collection(COLLECTIONS.VACATIONS)
     .where('userId', '==', userId)
-    .orderBy('startDate', 'asc')
     .get();
 
-  return snapshot.docs.map((doc) => doc.data() as Vacation);
+  return snapshot.docs
+    .map((doc) => doc.data() as Vacation)
+    .sort((a, b) => a.startDate.localeCompare(b.startDate));
 }
 
 /**
@@ -213,20 +217,16 @@ export async function getUserParkingHistory(
   limit?: number
 ): Promise<ParkingHistory[]> {
   const db = getFirestore();
-  let query = db
+  const snapshot = await db
     .collection(COLLECTIONS.PARKING_HISTORY)
     .where('userId', '==', userId)
-    .orderBy('date', 'desc');
+    .get();
 
-  if (limit) {
-    query = query.limit(limit);
-  }
+  const results = snapshot.docs
+    .map((doc) => ({ id: doc.id, ...doc.data() }) as ParkingHistory)
+    .sort((a, b) => b.date.localeCompare(a.date));
 
-  const snapshot = await query.get();
-  return snapshot.docs.map((doc) => ({
-    id: doc.id,
-    ...doc.data(),
-  })) as ParkingHistory[];
+  return limit ? results.slice(0, limit) : results;
 }
 
 /**
@@ -293,4 +293,132 @@ export async function runTransaction<T>(
 ): Promise<T> {
   const db = getFirestore();
   return db.runTransaction(updateFunction);
+}
+
+/**
+ * Get a user document by userId
+ */
+export async function getUser(userId: string): Promise<User | null> {
+  const db = getFirestore();
+  const doc = await db.collection(COLLECTIONS.USERS).doc(userId).get();
+
+  if (!doc.exists) {
+    return null;
+  }
+
+  return doc.data() as User;
+}
+
+/**
+ * Set a user document (creates or replaces)
+ */
+export async function setUser(user: User): Promise<void> {
+  const db = getFirestore();
+  await db.collection(COLLECTIONS.USERS).doc(user.userId).set(user);
+}
+
+/**
+ * Atomically increment a user's points by delta (positive or negative).
+ * Creates the document with points = delta if it doesn't exist.
+ */
+export async function updateUserPoints(userId: string, delta: number): Promise<void> {
+  const db = getFirestore();
+  const docRef = db.collection(COLLECTIONS.USERS).doc(userId);
+
+  await db.runTransaction(async (transaction) => {
+    const doc = await transaction.get(docRef);
+
+    if (!doc.exists) {
+      transaction.set(docRef, { userId, points: delta, isActive: true });
+    } else {
+      const current = (doc.data() as User).points ?? 0;
+      transaction.update(docRef, { points: current + delta });
+    }
+  });
+}
+
+/**
+ * Get all finalized parking assignments where the user was an original primary
+ */
+export async function getUserPrimaryAssignments(
+  userId: string
+): Promise<ParkingAssignment[]> {
+  const db = getFirestore();
+  const snapshot = await db
+    .collection(COLLECTIONS.PARKING_ASSIGNMENTS)
+    .where('originalPrimaryUsers', 'array-contains', userId)
+    .get();
+
+  return snapshot.docs
+    .map((doc) => doc.data() as ParkingAssignment)
+    .filter((a) => a.isFinalized);
+}
+
+/**
+ * Add a points history entry
+ */
+export async function addPointsHistoryEntry(
+  entry: Omit<PointsHistoryEntry, 'id'>
+): Promise<void> {
+  const db = getFirestore();
+  await db.collection(COLLECTIONS.POINTS_HISTORY).add(entry);
+}
+
+/**
+ * Get points history for a user, ordered by timestamp descending
+ */
+export async function getUserPointsHistory(
+  userId: string,
+  limit?: number
+): Promise<PointsHistoryEntry[]> {
+  const db = getFirestore();
+  const snapshot = await db
+    .collection(COLLECTIONS.POINTS_HISTORY)
+    .where('userId', '==', userId)
+    .get();
+
+  const results = snapshot.docs
+    .map((doc) => ({ id: doc.id, ...doc.data() }) as PointsHistoryEntry)
+    .sort((a, b) => b.timestamp.toMillis() - a.timestamp.toMillis());
+
+  return limit ? results.slice(0, limit) : results;
+}
+
+/**
+ * Update specific fields on a user document
+ */
+export async function updateUser(userId: string, updates: Partial<User>): Promise<void> {
+  const db = getFirestore();
+  await db.collection(COLLECTIONS.USERS).doc(userId).update(updates);
+}
+
+/**
+ * Get a weekly schedule document by week start date (Monday ISO date)
+ */
+export async function getWeeklySchedule(weekStartDate: string): Promise<WeeklySchedule | null> {
+  const db = getFirestore();
+  const doc = await db.collection(COLLECTIONS.WEEKLY_SCHEDULE).doc(weekStartDate).get();
+  if (!doc.exists) return null;
+  return doc.data() as WeeklySchedule;
+}
+
+/**
+ * Create or overwrite a weekly schedule document
+ */
+export async function setWeeklySchedule(schedule: WeeklySchedule): Promise<void> {
+  const db = getFirestore();
+  await db.collection(COLLECTIONS.WEEKLY_SCHEDULE).doc(schedule.weekStartDate).set(schedule);
+}
+
+/**
+ * Get all active users
+ */
+export async function getAllActiveUsers(): Promise<User[]> {
+  const db = getFirestore();
+  const snapshot = await db
+    .collection(COLLECTIONS.USERS)
+    .where('isActive', '==', true)
+    .get();
+
+  return snapshot.docs.map((doc) => doc.data() as User);
 }
