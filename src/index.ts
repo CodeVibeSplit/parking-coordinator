@@ -90,15 +90,17 @@ async function main() {
     console.log('   /parking-admin-reorder - Admin: Reorder team rotation');
 
     // Handle graceful shutdown
-    process.on('SIGINT', async () => {
+    const shutdown = async () => {
       console.log('\n\n🛑 Shutting down gracefully...');
+      try {
+        // Close the Slack connection (Socket Mode WebSocket) so the process exits cleanly
+        await Promise.race([app.stop(), new Promise((r) => setTimeout(r, 2000))]);
+      } catch (_) { /* ignore */ }
       process.exit(0);
-    });
+    };
 
-    process.on('SIGTERM', async () => {
-      console.log('\n\n🛑 Shutting down gracefully...');
-      process.exit(0);
-    });
+    process.on('SIGINT', shutdown);
+    process.on('SIGTERM', shutdown);
   } catch (error) {
     console.error('\n❌ Failed to start application:', error);
     process.exit(1);
