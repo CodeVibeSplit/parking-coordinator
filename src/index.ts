@@ -7,6 +7,10 @@ import { registerCommandHandlers } from './handlers/commandHandlers';
 import { registerActionHandlers } from './handlers/actionHandlers';
 import { registerReorderHandlers } from './handlers/reorderHandlers';
 
+// Register signal handlers immediately so tsx watch can always kill the process
+process.on('SIGINT', () => process.exit(0));
+process.on('SIGTERM', () => process.exit(0));
+
 /**
  * Main application entry point
  */
@@ -88,19 +92,6 @@ async function main() {
     console.log('   /parking-stats [user] - View parking statistics');
     console.log('   /parking-admin-override <date> <users...> - Admin override');
     console.log('   /parking-admin-reorder - Admin: Reorder team rotation');
-
-    // Handle graceful shutdown
-    const shutdown = async () => {
-      console.log('\n\n🛑 Shutting down gracefully...');
-      try {
-        // Close the Slack connection (Socket Mode WebSocket) so the process exits cleanly
-        await Promise.race([app.stop(), new Promise((r) => setTimeout(r, 2000))]);
-      } catch (_) { /* ignore */ }
-      process.exit(0);
-    };
-
-    process.on('SIGINT', shutdown);
-    process.on('SIGTERM', shutdown);
   } catch (error) {
     console.error('\n❌ Failed to start application:', error);
     process.exit(1);
